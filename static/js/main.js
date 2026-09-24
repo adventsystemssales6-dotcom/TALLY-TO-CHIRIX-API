@@ -1,3 +1,4 @@
+document.addEventListener("DOMContentLoaded", () => {
     // ── API Architecture ────────────────────────────────────────────────────────
     // CLOUD_API_BASE: Where the web app is hosted (for Chirix fetch, data conversion, XML export)
     const CLOUD_API_BASE = window.location.origin.startsWith("http") ? window.location.origin : "http://localhost:5000";
