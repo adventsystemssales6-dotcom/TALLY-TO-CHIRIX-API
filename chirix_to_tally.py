@@ -16,6 +16,7 @@ FIXED (see inline comments marked "# FIX:"):
      The HTTP fetch is kept as a fallback for items not present in the local payload.
 """
 
+import os
 import json
 import re
 import uuid
@@ -62,10 +63,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ChirixToTally")
 
-TALLY_HTTP_URL = "http://127.0.0.1:9000"
+TALLY_HTTP_URL = os.environ.get("TALLY_HTTP_URL", "http://127.0.0.1:9000")
 # Optional: set this to target a specific company when more than one is loaded in TallyPrime.
 # Leave blank ("") to import into whichever company is currently active in Tally.
-TALLY_COMPANY_NAME = ""
+TALLY_COMPANY_NAME = os.environ.get("TALLY_COMPANY_NAME", "")
 
 # GST UQC (Unit Quantity Code) mapping — Tally requires UQC for GST compliance
 UQC_MAP = {
