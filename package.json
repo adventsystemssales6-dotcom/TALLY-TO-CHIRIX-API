@@ -1,0 +1,64 @@
+{
+  "name": "chirix-to-tally-middleware",
+  "version": "1.0.0",
+  "description": "Desktop Application for Chirix ERP to TallyPrime Middleware",
+  "main": "electron-main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:engine": "pyinstaller --noconfirm --onedir --windowed --name chirix-tally-backend --distpath dist-engine --add-data \"templates;templates\" --add-data \"static;static\" app.py",
+    "build:installer": "electron-builder --win",
+    "build:all": "npm run build:engine && npm run build:installer"
+  },
+  "keywords": [
+    "tally",
+    "chirix",
+    "middleware",
+    "electron"
+  ],
+  "author": "Chirix-Tally Integration",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.chirix.tally.middleware",
+    "productName": "Chirix to Tally Middleware",
+    "asar": true,
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron-main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-engine/chirix-tally-backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Chirix to Tally Middleware",
+      "uninstallDisplayName": "Chirix to Tally Middleware"
+    }
+  }
+}

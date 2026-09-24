@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chirix ERP → TallyPrime Middleware</title>
+    <meta name="description" content="Chirix ERP to TallyPrime data exchange — fetch invoices by company & date range, validate and push directly to TallyPrime.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="app-container">
+
+    <!-- ── Header ── -->
+    <header class="navbar">
+        <div class="brand">
+            <div class="logo-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+            <div class="brand-text">
+                <h1>Chirix <span>to</span> TallyPrime</h1>
+                <p class="subtitle">Enterprise Data Exchange &amp; Direct Voucher Push System</p>
+            </div>
+        </div>
+        <div class="tally-status-badge">
+            <div class="status-indicator-dot pulse-gray" id="statusDot"></div>
+            <div class="status-info">
+                <span class="status-label">TallyPrime:</span>
+                <span class="status-value" id="statusText">Checking…</span>
+            </div>
+            <button class="btn-icon" id="btnRefreshStatus" title="Refresh Tally status">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- ── Main grid ── -->
+    <main class="dashboard-grid">
+
+        <!-- ── Left panel: Fetch ── -->
+        <section class="panel upload-panel glass">
+            <div class="panel-header">
+                <h2><i class="fa-solid fa-plug-circle-bolt"></i> 1. Fetch from Chirix ERP</h2>
+            </div>
+
+            <!-- Endpoint badge -->
+            <div class="api-endpoint-badge">
+                <span class="api-method-tag">GET</span>
+                <span class="api-endpoint-url">chirixsolutions.com/api/data</span>
+                <span class="api-txn-tag">Transaction-Type: SIV</span>
+            </div>
+
+            <!-- Config card -->
+            <div class="api-config-card">
+
+                <!-- Company selector -->
+                <div class="field-group">
+                    <label class="field-label">
+                        <i class="fa-solid fa-building"></i> Select Company
+                    </label>
+                    <div class="company-selector">
+                        <button type="button" class="company-btn active" id="btnCompanyRIK" data-company="RIK">
+                            <span class="company-code">RIK</span>
+                            <span class="company-name">RIK Company</span>
+                        </button>
+                        <button type="button" class="company-btn" id="btnCompanyFBT" data-company="FBT">
+                            <span class="company-code">FBT</span>
+                            <span class="company-name">FBT Company</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Auth token input (Hidden) -->
+                <div class="field-group" style="display: none;">
+                    <label class="field-label" for="tokenInput">
+                        <i class="fa-solid fa-key"></i>
+                        Chirix-Auth-Token
+                        <span class="field-hint" id="tokenHint">Token for RIK</span>
+                    </label>
+                    <div class="input-wrapper">
+                        <input
+                            type="password"
+                            id="tokenInput"
+                            class="form-input mono-input"
+                            value="52494B54432D30303036"
+                            placeholder="Enter Chirix-Auth-Token"
+                            autocomplete="off"
+                            spellcheck="false"
+                        >
+                        <button class="btn-icon input-toggle-btn" data-target="tokenInput" title="Show / Hide">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
+                    <!-- Live header preview -->
+                    <div class="token-preview">
+                        <span class="token-preview-label">Chirix-Auth-Token Header:</span>
+                        <code class="token-preview-value" id="tokenPreviewValue">52494B54432D30303036</code>
+                    </div>
+                </div>
+
+                <!-- Date range -->
+                <div class="date-range-row">
+                    <div class="field-group">
+                        <label class="field-label" for="dateFrom">
+                            <i class="fa-solid fa-calendar-day"></i> dateFrom
+                            <span class="field-hint">dd/mm/yyyy</span>
+                        </label>
+                        <input type="date" id="dateFrom" class="form-input date-input">
+                    </div>
+                    <div class="date-range-sep"><i class="fa-solid fa-arrow-right"></i></div>
+                    <div class="field-group">
+                        <label class="field-label" for="dateTo">
+                            <i class="fa-solid fa-calendar-check"></i> dateTo
+                            <span class="field-hint">dd/mm/yyyy</span>
+                        </label>
+                        <input type="date" id="dateTo" class="form-input date-input">
+                    </div>
+                </div>
+
+                <!-- Fetch button -->
+                <button class="btn btn-fetch btn-lg" id="btnFetch">
+                    <i class="fa-solid fa-cloud-arrow-down" id="btnFetchIcon"></i>
+                    <span id="btnFetchLabel">Fetch Invoices from Chirix</span>
+                </button>
+            </div>
+
+            <!-- Fetch status bar -->
+            <div class="fetch-status-bar hidden" id="fetchStatusBar">
+                <div class="fetch-status-icon success" id="fetchStatusIconWrap">
+                    <i class="fa-solid fa-circle-check" id="fetchStatusIcon"></i>
+                </div>
+                <div class="fetch-status-text">
+                    <span class="fetch-status-title" id="fetchStatusTitle">Fetched</span>
+                    <span class="fetch-status-sub"   id="fetchStatusSub">Ready to validate</span>
+                </div>
+                <button class="btn-icon danger" id="btnClearFetch" title="Clear">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Accounting summary -->
+            <div class="invoice-summary-box hidden" id="invoiceSummaryBox">
+                <div class="summary-header">
+                    <h3><i class="fa-solid fa-scale-balanced"></i> Accounting Balance Check</h3>
+                    <span class="badge badge-success" id="badgeBalanced">Debit = Credit Validated</span>
+                </div>
+                <div class="summary-stats-grid">
+                    <div class="stat-card">
+                        <span class="stat-title">Total Invoices Fetched</span>
+                        <span class="stat-num" id="statTotalCount">0</span>
+                    </div>
+                    <div class="stat-card" style="display: none;">
+                        <span class="stat-title">Total Debit</span>
+                        <span class="stat-num" id="statTotalDebit">₹0.00</span>
+                    </div>
+                    <div class="stat-card" style="display: none;">
+                        <span class="stat-title">Total Credit</span>
+                        <span class="stat-num" id="statTotalCredit">₹0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="action-bar">
+                <button class="btn btn-primary btn-lg" id="btnConvert" disabled>
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Validate &amp; Convert
+                </button>
+                <button class="btn btn-accent btn-lg" id="btnPushTally" disabled>
+                    <i class="fa-solid fa-paper-plane"></i> Push Straight to TallyPrime
+                </button>
+            </div>
+        </section>
+
+        <!-- ── Right panel: Preview ── -->
+        <section class="panel preview-panel glass">
+            <div class="panel-header">
+                <div class="tab-controls">
+                    <button class="tab-btn active" data-target="outputTab">
+                        <i class="fa-solid fa-brackets-curly"></i> Converted Tally JSON
+                    </button>
+                    <button class="tab-btn" data-target="inputTab">
+                        <i class="fa-solid fa-code"></i> Raw Chirix Response
+                    </button>
+                </div>
+                <div class="preview-actions">
+                    <button class="btn btn-secondary btn-sm" id="btnCopyJson">
+                        <i class="fa-regular fa-copy"></i> Copy JSON
+                    </button>
+                    <button class="btn btn-secondary btn-sm" id="btnDownloadJson">
+                        <i class="fa-solid fa-download"></i> Download
+                    </button>
+                </div>
+            </div>
+            <div class="tab-pane active" id="outputTab">
+                <pre class="json-code-display"><code id="tallyJsonCode">// Converted Tally JSON will appear here…</code></pre>
+            </div>
+            <div class="tab-pane hidden" id="inputTab">
+                <pre class="json-code-display"><code id="chirixJsonCode">// Raw Chirix API response will appear here…</code></pre>
+            </div>
+        </section>
+    </main>
+
+    <!-- ── Push Result Modal ── -->
+    <div class="modal-overlay hidden" id="resultModal">
+        <div class="modal-card glass">
+            <div class="modal-header">
+                <h3 id="modalTitle"><i class="fa-solid fa-circle-check text-success"></i> Tally Import Complete</h3>
+                <button class="btn-icon" id="btnCloseModal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="results-grid">
+                    <div class="result-box created">
+                        <span class="res-num" id="resCreated">0</span>
+                        <span class="res-label">Vouchers Created</span>
+                    </div>
+                    <div class="result-box altered">
+                        <span class="res-num" id="resAltered">0</span>
+                        <span class="res-label">Masters Synced</span>
+                    </div>
+                    <div class="result-box exceptions">
+                        <span class="res-num" id="resExceptions">0</span>
+                        <span class="res-label">Exceptions / Errors</span>
+                    </div>
+                </div>
+                <div class="response-log-box">
+                    <label>Tally Server Raw Response:</label>
+                    <pre><code id="rawResponseLog">…</code></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btnDoneModal">Close</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+<script src="{{ url_for('static', filename='js/main.js') }}?v=4.0"></script>
+</body>
+</html>
