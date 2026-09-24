@@ -2133,6 +2133,38 @@ def push_vouchers_to_tally(raw_invoices: Any, tally_url: str = TALLY_HTTP_URL, e
         raise
 
 
+def build_tally_vouchers_xml_envelope(raw_invoices: Any, entry_mode: str = "Accounting Invoice") -> str:
+    """Builds the complete Tally XML import envelope string for transactions without sending HTTP request."""
+    vouchers = extract_vouchers_from_json(raw_invoices)
+    hsn_lookup = extract_stock_item_hsn_map(raw_invoices)
+    valid_voucher_xmls = []
+    for inv in vouchers:
+        try:
+            xml_msg = convert_invoice_to_xml_message(inv, hsn_lookup=hsn_lookup, entry_mode=entry_mode)
+            if xml_msg:
+                valid_voucher_xmls.append(xml_msg)
+        except Exception as ve:
+            logger.warning(f"Skipping invalid invoice in XML export: {ve}")
+
+    voucher_msgs = "".join(valid_voucher_xmls)
+    static_vars_xml = f"\n     <STATICVARIABLES>\n      <SVCURRENTCOMPANY>{xml_escape(TALLY_COMPANY_NAME)}</SVCURRENTCOMPANY>\n     </STATICVARIABLES>" if TALLY_COMPANY_NAME else ""
+    return f"""<ENVELOPE>
+ <HEADER>
+  <TALLYREQUEST>Import Data</TALLYREQUEST>
+ </HEADER>
+ <BODY>
+  <IMPORTDATA>
+   <REQUESTDESC>
+    <REPORTNAME>Vouchers</REPORTNAME>{static_vars_xml}
+   </REQUESTDESC>
+   <REQUESTDATA>
+    {voucher_msgs}
+   </REQUESTDATA>
+  </IMPORTDATA>
+ </BODY>
+</ENVELOPE>"""
+
+
 def generate_tally_masters_json(raw_data: Any) -> List[Dict[str, Any]]:
     """Generates native Tally JSON objects for all required Masters (Ledgers, Units, Stock Items)."""
     master_records = []

@@ -32,6 +32,7 @@ from chirix_to_tally import (
     transform_invoice_to_tally_json,
     validate_voucher_balance,
     push_vouchers_to_tally,
+    build_tally_vouchers_xml_envelope,
     ensure_tally_masters_exist,
     normalize_invoice_data,
     extract_vouchers_from_json,
@@ -98,14 +99,28 @@ def parse_xml_metrics(xml_str: str) -> dict:
     }
 
 
-# ── Middleware ───────────────────────────────────────────────────────────────────
+# ── Middleware & CORS (with Private Network Access support) ─────────────────────
+
+@app.before_request
+def handle_options():
+    if request.method == "OPTIONS":
+        origin = request.headers.get("Origin", "*")
+        res = Response(status=204)
+        res.headers["Access-Control-Allow-Origin"]  = origin
+        res.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        res.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Chirix-Auth-Token"
+        res.headers["Access-Control-Allow-Private-Network"] = "true"
+        res.headers["Access-Control-Allow-Credentials"]     = "true"
+        return res
 
 @app.after_request
 def add_cors_headers(response):
-    allowed = app.config.get("CORS_ORIGINS", "*")
-    response.headers["Access-Control-Allow-Origin"]  = allowed
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    origin = request.headers.get("Origin", "*")
+    response.headers["Access-Control-Allow-Origin"]  = origin
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Chirix-Auth-Token"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    response.headers["Access-Control-Allow-Credentials"]     = "true"
     return response
 
 
@@ -156,8 +171,54 @@ def index():
 
 @app.route("/api/status", methods=["GET"])
 def check_tally_status():
-    """Check whether TallyPrime is reachable (via connector in cloud mode, direct in local mode)."""
-    return jsonify(connector_check_status())
+    """Check whether TallyPrime is reachable on localhost:9000."""
+    target = os.environ.get("TALLY_HTTP_URL", "http://127.0.0.1:9000")
+    try:
+        req = urllib.request.Request(target, method="GET")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return jsonify({
+                "connected": True,
+                "url": target,
+                "status": resp.status
+            })
+    except urllib.error.HTTPError as e:
+        return jsonify({
+            "connected": True,
+            "url": target,
+            "status": e.code
+        })
+    except Exception as e:
+        return jsonify({
+            "connected": False,
+            "url": target,
+            "error": str(e)
+        })
+
+
+@app.route("/api/export-xml", methods=["POST"])
+def export_tally_xml():
+    """Generates a downloadable Tally XML file for manual import (Alt + O) in TallyPrime."""
+    try:
+        req_data = request.get_json(force=True)
+        entry_mode = "Accounting Invoice"
+        if isinstance(req_data, dict):
+            entry_mode = req_data.get("entry_mode", "Accounting Invoice")
+            payload = req_data.get("invoices", req_data)
+        else:
+            payload = req_data
+
+        xml_content = build_tally_vouchers_xml_envelope(payload, entry_mode=entry_mode)
+        return Response(
+            xml_content,
+            mimetype="application/xml",
+            headers={
+                "Content-Disposition": "attachment; filename=tally_vouchers.xml",
+                "Content-Type": "application/xml; charset=utf-8"
+            }
+        )
+    except Exception as e:
+        app.logger.error(f"XML Export Error: {e}")
+        return jsonify({"success": False, "error": f"XML Export Error: {e}"}), 500
 
 
 def _fetch_single_chirix_call(api_url, api_key, date_from, date_to, ssl_ctx, timeout=30):

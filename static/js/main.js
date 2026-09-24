@@ -1,5 +1,14 @@
-document.addEventListener("DOMContentLoaded", () => {
-    const API_BASE = window.location.origin.startsWith("http") ? window.location.origin : "http://localhost:5000";
+    // ── API Architecture ────────────────────────────────────────────────────────
+    // CLOUD_API_BASE: Where the web app is hosted (for Chirix fetch, data conversion, XML export)
+    const CLOUD_API_BASE = window.location.origin.startsWith("http") ? window.location.origin : "http://localhost:5000";
+
+    // Detect if the browser is running locally on the customer PC
+    const isLocalBrowser = window.location.hostname === "localhost" ||
+                           window.location.hostname === "127.0.0.1" ||
+                           window.location.hostname.startsWith("192.168.");
+
+    // LOCAL_API_BASE: The customer's local Flask engine on their PC, which communicates with localhost:9000
+    const LOCAL_API_BASE = isLocalBrowser ? CLOUD_API_BASE : "http://127.0.0.1:5000";
 
     // Company default tokens
     const COMPANY_TOKENS = {
@@ -34,6 +43,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const btnConvert        = document.getElementById("btnConvert");
     const btnPushTally      = document.getElementById("btnPushTally");
+    const btnDownloadXml    = document.getElementById("btnDownloadXml");
+    const btnDownloadXmlPreview = document.getElementById("btnDownloadXmlPreview");
 
     const invoiceSummaryBox = document.getElementById("invoiceSummaryBox");
     const statTotalCount    = document.getElementById("statTotalCount");
@@ -72,25 +83,30 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // ── Tally status polling ────────────────────────────────────────────────────
+    // ── Tally status polling (Checks Customer's Local Flask App -> Tally 9000) ──
     checkTallyStatus();
     setInterval(checkTallyStatus, 5000);
     if (btnRefreshStatus) btnRefreshStatus.addEventListener("click", checkTallyStatus);
 
     async function checkTallyStatus() {
         try {
-            const res  = await fetch(`${API_BASE}/api/status`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2500);
+            const res = await fetch(`${LOCAL_API_BASE}/api/status`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
             const data = await res.json();
             if (data.connected) {
                 statusDot.className  = "status-indicator-dot pulse-green";
-                statusText.innerText = "Online (Port 9000)";
+                statusText.innerText = "Online (Local Tally :9000)";
             } else {
-                statusDot.className  = "status-indicator-dot pulse-red";
-                statusText.innerText = "Offline — Start Tally HTTP";
+                statusDot.className  = "status-indicator-dot pulse-yellow";
+                statusText.innerText = "Local Engine OK · Open Tally";
             }
         } catch {
             statusDot.className  = "status-indicator-dot pulse-red";
-            statusText.innerText = "Disconnected";
+            statusText.innerText = isLocalBrowser ? "TallyPrime Disconnected" : "Local Engine Offline (Port 5000)";
         }
     }
 
@@ -177,7 +193,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const dateToChirix   = toChirixDate(toValue);
 
         try {
-            const res = await fetch(`${API_BASE}/api/fetch`, {
+            const res = await fetch(`${CLOUD_API_BASE}/api/fetch`, {
                 method:  "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -316,8 +332,9 @@ document.addEventListener("DOMContentLoaded", () => {
         currentChirixData  = null;
         convertedTallyData = null;
         if (invoiceSummaryBox) invoiceSummaryBox.classList.add("hidden");
-        if (btnConvert)   btnConvert.disabled  = true;
-        if (btnPushTally) btnPushTally.disabled = true;
+        if (btnConvert)     btnConvert.disabled     = true;
+        if (btnPushTally)   btnPushTally.disabled   = true;
+        if (btnDownloadXml) btnDownloadXml.disabled = true;
         if (tallyJsonCode)  tallyJsonCode.innerText  = "// Converted Tally JSON will appear here…";
         if (chirixJsonCode) chirixJsonCode.innerText = "// Raw Chirix API response will appear here…";
     }
@@ -337,7 +354,7 @@ document.addEventListener("DOMContentLoaded", () => {
             btnConvert.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Validating…';
         }
         try {
-            const res  = await fetch(`${API_BASE}/api/convert`, {
+            const res  = await fetch(`${CLOUD_API_BASE}/api/convert`, {
                 method:  "POST",
                 headers: { "Content-Type": "application/json" },
                 body:    JSON.stringify(currentChirixData)
@@ -364,7 +381,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 badgeBalanced.innerText = allBalanced ? "Debit = Credit Validated" : "Accounting Imbalance";
             }
             if (invoiceSummaryBox) invoiceSummaryBox.classList.remove("hidden");
-            if (btnPushTally)      btnPushTally.disabled = false;
+            if (btnPushTally)      btnPushTally.disabled   = false;
+            if (btnDownloadXml)    btnDownloadXml.disabled = false;
         } catch (err) {
             alert("Conversion failed: " + err.message);
         } finally {
@@ -375,14 +393,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // ── Push to TallyPrime ──────────────────────────────────────────────────────
+    // ── Push to Customer's Local TallyPrime (via Local Flask App :5000) ─────────
     if (btnPushTally) {
         btnPushTally.addEventListener("click", async () => {
             if (!currentChirixData) return;
             btnPushTally.disabled = true;
-            btnPushTally.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing to Tally…';
+            btnPushTally.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing to Local Tally…';
             try {
-                const res  = await fetch(`${API_BASE}/api/push`, {
+                const res  = await fetch(`${LOCAL_API_BASE}/api/push`, {
                     method:  "POST",
                     headers: { "Content-Type": "application/json" },
                     body:    JSON.stringify(currentChirixData)
@@ -401,13 +419,49 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (rawResponseLog) rawResponseLog.innerText = log;
                 if (resultModal)    resultModal.classList.remove("hidden");
             } catch (err) {
-                alert("Push failed: " + err.message);
+                const msg = isLocalBrowser
+                    ? `Push failed: ${err.message}\nMake sure TallyPrime is open on Port 9000.`
+                    : `Cannot reach Local Flask App at ${LOCAL_API_BASE}.\n\n` +
+                      `To push directly into Tally on your computer:\n` +
+                      `1. Open a terminal on your PC and run:\n   python app.py\n` +
+                      `2. Ensure TallyPrime is running.\n\n` +
+                      `Alternatively, click 'Download Tally XML' to import into Tally manually (Alt + O).`;
+                alert(msg);
             } finally {
                 btnPushTally.disabled = false;
-                btnPushTally.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Push Straight to TallyPrime';
+                btnPushTally.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Push to Local Tally (Port 9000)';
             }
         });
     }
+
+    // ── Download Tally XML for Manual Import (Alt + O in Tally) ─────────────────
+    async function downloadTallyXml() {
+        if (!currentChirixData) {
+            alert("Please fetch and validate invoices first.");
+            return;
+        }
+        try {
+            const res = await fetch(`${CLOUD_API_BASE}/api/export-xml`, {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify(currentChirixData)
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const xmlBlob = await res.blob();
+            const url  = URL.createObjectURL(xmlBlob);
+            const a    = Object.assign(document.createElement("a"), {
+                href: url,
+                download: `tally_vouchers_${selectedCompany}.xml`
+            });
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert("XML Export failed: " + err.message);
+        }
+    }
+
+    if (btnDownloadXml)        btnDownloadXml.addEventListener("click", downloadTallyXml);
+    if (btnDownloadXmlPreview) btnDownloadXmlPreview.addEventListener("click", downloadTallyXml);
 
     // ── Modal ───────────────────────────────────────────────────────────────────
     [btnCloseModal, btnDoneModal].forEach(b => {
