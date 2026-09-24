@@ -52,14 +52,17 @@ def reset_pushed_set() -> None:
     PUSHED_INVOICE_KEYS.clear()
 
 
-# Configure Logging
+# Configure Logging (cloud-safe: FileHandler only when writable)
+_log_handlers = [logging.StreamHandler(sys.stdout)]
+try:
+    _log_handlers.append(logging.FileHandler("tally_conversion.log", mode='a', encoding='utf-8'))
+except (OSError, PermissionError):
+    pass  # Read-only filesystem on cloud — skip file logging
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("tally_conversion.log", mode='a', encoding='utf-8')
-    ]
+    handlers=_log_handlers
 )
 logger = logging.getLogger("ChirixToTally")
 

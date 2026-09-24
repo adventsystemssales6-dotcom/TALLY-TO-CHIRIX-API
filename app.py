@@ -25,6 +25,9 @@ import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, Response
 
+from config import get_config
+from tally.connector import check_tally_status as connector_check_status, get_tally_mode
+
 from chirix_to_tally import (
     transform_invoice_to_tally_json,
     validate_voucher_balance,
@@ -37,6 +40,9 @@ from chirix_to_tally import (
     mark_as_pushed,
     TALLY_HTTP_URL
 )
+
+# ── Configuration ────────────────────────────────────────────────────────────────
+app_config = get_config()
 
 # ── Base Directory Configuration (PyInstaller Support) ──────────────────────────
 if getattr(sys, "frozen", False):
@@ -53,15 +59,19 @@ app = Flask(
     static_folder=os.path.join(base_dir, "static"),
     template_folder=os.path.join(base_dir, "templates")
 )
+app.config.from_object(app_config)
 
-# ── Logging ─────────────────────────────────────────────────────────────────────
+# ── Logging (cloud-safe: FileHandler only when writable) ────────────────────────
+log_handlers = [logging.StreamHandler(sys.stdout)]
+try:
+    log_handlers.append(logging.FileHandler(log_path, mode="a", encoding="utf-8"))
+except (OSError, PermissionError):
+    pass  # Read-only filesystem on cloud — skip file logging
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, app_config.LOG_LEVEL, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    ]
+    handlers=log_handlers
 )
 
 
@@ -92,7 +102,8 @@ def parse_xml_metrics(xml_str: str) -> dict:
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"]  = "*"
+    allowed = app.config.get("CORS_ORIGINS", "*")
+    response.headers["Access-Control-Allow-Origin"]  = allowed
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
@@ -101,6 +112,38 @@ def add_cors_headers(response):
 @app.route("/favicon.ico")
 def favicon():
     return Response(status=204)
+
+
+# ── Health Check (required by Render) ────────────────────────────────────────────
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Unauthenticated health endpoint for Render / load-balancer probes."""
+    return jsonify({
+        "status": "ok",
+        "service": "chirix-tally-middleware",
+        "tally_mode": get_tally_mode(),
+    })
+
+
+# ── Production Error Handlers ────────────────────────────────────────────────────
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({"success": False, "error": "Bad request", "detail": str(e)}), 400
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"success": False, "error": "Endpoint not found"}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({"success": False, "error": "Method not allowed"}), 405
+
+@app.errorhandler(500)
+def internal_error(e):
+    app.logger.error(f"Internal server error: {e}")
+    return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────────
@@ -113,15 +156,8 @@ def index():
 
 @app.route("/api/status", methods=["GET"])
 def check_tally_status():
-    """Check whether TallyPrime HTTP server is listening on port 9000."""
-    try:
-        req = urllib.request.Request(TALLY_HTTP_URL, method="GET")
-        with urllib.request.urlopen(req, timeout=2) as response:
-            return jsonify({"connected": True, "url": TALLY_HTTP_URL, "status": response.status})
-    except urllib.error.HTTPError as e:
-        return jsonify({"connected": True,  "url": TALLY_HTTP_URL, "status": e.code})
-    except Exception as e:
-        return jsonify({"connected": False, "url": TALLY_HTTP_URL, "error": str(e)})
+    """Check whether TallyPrime is reachable (via connector in cloud mode, direct in local mode)."""
+    return jsonify(connector_check_status())
 
 
 def _fetch_single_chirix_call(api_url, api_key, date_from, date_to, ssl_ctx, timeout=30):
@@ -425,10 +461,12 @@ def push_to_tally():
         return jsonify({"success": False, "error": f"Tally Push Error: {e}"}), 500
 
 
-# ── Entry point ──────────────────────────────────────────────────────────────────
+# ── Entry point (development only — production uses gunicorn) ────────────────────
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
+    debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1" or app.config.get("DEBUG", False)
     print(f"Starting Chirix to Tally Middleware Web UI on http://localhost:{port}")
+    print(f"  Tally mode : {get_tally_mode()}")
+    print(f"  Debug      : {debug_mode}")
     app.run(host="0.0.0.0", port=port, debug=debug_mode)
